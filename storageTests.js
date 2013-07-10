@@ -53,6 +53,9 @@ describe("storage-js", function() {
 					expect(storage.get("object")).toBeUndefined();
 					expect(storage.get("array")).toBeUndefined();
 				});
+				it("leaves it empty", function() {
+					expect(storage()).toEqual({});
+				});
 			});
 			describe("complex keys", function() {
 				it("can be set starting from an undefined key", function() {
@@ -172,6 +175,15 @@ describe("storage-js", function() {
 	it("can initialize page storage", function() {
 		var page = storage("page");
 		expect(typeof page).toBe("function");
+	});
+	it("fails to initialize on a storage name that doesn't exist", function() {
+		expect(storage("blah")).toBeUndefined();
+	});
+	it("fails to initialize on a storage method that doesn't define all functions", function() {
+		expect(storage({"get":function(){}})).toBeUndefined();
+	});
+	it("fails to initialize if no storage method is passed", function() {
+		expect(storage()).toBeUndefined();
 	});
 	
 	testStorage("session", storage("session"));

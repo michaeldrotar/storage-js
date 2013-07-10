@@ -39,6 +39,14 @@
 				console.log.apply(console, karmifyLog.apply(this, arguments));
 			}
 		},
+		// Returns a list of keys from the given object
+		listKeys = function(obj) {
+			var list = [], k;
+			for ( k in obj ) {
+				list.push(k);
+			}
+			return list.join(", ");
+		},
 		// The library function, which can be used to call its methods, most primarily used to call the init method
 		storage = function(method) {
 			if ( storage[method] ) {
@@ -62,7 +70,7 @@
 				return false;
 			}
 			for ( i = 0, l = val.length; i < l; i++ ) {
-				if ( typeof val[i] !== "string" ) {
+				if ( !isKeySimple(val[i]) ) {
 					return false;
 				}
 			}
@@ -111,10 +119,10 @@
 				return all.call(this, defaultValue);
 			} else if ( isKey(key) ) {
 				key = makeArray(key);
-				rawValue = this.storage.get(key[0]);
+				rawValue = this.medium.get(key[0]);
 				if ( rawValue !== undefined ) {
 					try {
-						decodedValue = this.storage.decode(rawValue);
+						decodedValue = this.medium.decode(rawValue);
 					} catch (e) {
 						log("Error occured decoding value stored at",key);
 					}
@@ -144,23 +152,27 @@
 					this.set(key, value[key]);
 				}
 			} else if ( isKey(key) ) {
-				if ( value === undefined ) {
-					log("storage.set passing control to storage.clear");
-					return this.clear(key);
-				}
-				
-				if ( isSupportedValue(value) ) {
-					key = makeArray(key);
-					if ( key.length <= 1 ) {
-						encodedValue = this.storage.encode(value);
-					} else {
-						// get the object at the root key, traverse it to the given key, set the value, encode
-						encodedValue = this.storage.encode(traverseObject(this.get(key[0]), key.slice(1), value));
-					}
-					this.storage.set(key[0], encodedValue);
-					log("Set",key,"as",value,"encoded as",encodedValue);
+				if ( arguments.length < 2 ) {
+					error("storage.set(key,value) a value must be supplied");
 				} else {
-					error("storage.set(key,value) value cannot be a function");
+					if ( value === undefined ) {
+						log("storage.set passing control to storage.clear");
+						return this.clear(key);
+					}
+					
+					if ( isSupportedValue(value) ) {
+						key = makeArray(key);
+						if ( key.length <= 1 ) {
+							encodedValue = this.medium.encode(value);
+						} else {
+							// get the object at the root key, traverse it to the given key, set the value, encode
+							encodedValue = this.medium.encode(traverseObject(this.get(key[0]), key.slice(1), value));
+						}
+						this.medium.set(key[0], encodedValue);
+						log("Set",key,"as",value,"encoded as",encodedValue);
+					} else {
+						error("storage.set(key,value) value cannot be a function");
+					}
 				}
 			} else {
 				error("storage.set(key,value) key must be one of string, array of strings, or object, got",k);
@@ -177,13 +189,13 @@
 			if ( isKey(key) ) {
 				key = makeArray(key);
 				if ( key.length == 1 ) {
-					this.storage.remove(key);
+					this.medium.remove(key);
 				} else {
 					traverseObject(this.get(key[0]), key.slice(1), undefined);
 				}
 				log("Cleared", key);
 			} else if ( key === undefined ) {
-				this.storage.clear();
+				this.medium.clear();
 				log("Cleared all");
 			} else {
 				error("storage.clear(key) key must be one of undefined, string, or array of strings, got",key);
@@ -217,13 +229,13 @@
 		},
 		// Returns an object representing the whole set of data
 		all = function(defaultValue) {
-			var allValues = this.storage.all(),
+			var allValues = this.medium.all(),
 				isEmpty = true,
 				k;
 			for ( k in allValues ) {
 				if ( allValues.hasOwnProperty(k) ) {
 					try {
-						allValues[k] = this.storage.decode(allValues[k]);
+						allValues[k] = this.medium.decode(allValues[k]);
 						isEmpty = false;
 					} catch(e) {
 						log("Error occured decoding value stored at",k);
@@ -351,32 +363,57 @@
 					}
 				};
 			})()
-		};
+		},
+		mediumOutline = mediums.session;
 	
-	mediums.default = mediums.session;
 	
 	// The init function initializes a new storage medium
 	// storage("string") will attempt to initialize using a predefined medium from the mediums list
 	// storage({}) will attempt to initialize using the given object medium, which should define all the functions
 	//   defined by the predefined mediums in the mediums list
-	// storage() will initialize the default medium
 	storage.init = function(medium) {
-		var newStorage;
+		var newStorage, k, err;
+		if ( typeof medium === "string" ) {
+			if ( !mediums[medium] ) {
+				err = "storage.init(medium) "+
+					"cannot instantiate a storage medium by name that's not in the list: "+
+					listKeys(mediums);
+				error(err);
+				return;
+			}
+			medium = mediums[medium];
+		}
+		if ( typeof medium === "object" ) {
+			err = "";
+			for ( k in mediumOutline ) {
+				if ( typeof medium[k] !== "function" ) {
+					err += ", "+k;
+				}
+			}
+			if ( err.length ) {
+				err = err.substring(2);
+				err = "storage.init(medium) "+
+					"cannot instantiate a custom storage medium that doesn't supply all of the required "+
+					"functions, missing: "+err;
+				error(err);
+				return;
+			}
+		} else {
+			err = "storage.init(medium) "+
+				"medium must be the name of a pre-defined storage medium or "+
+				"an object that implements all the functions of a custom storage medium";
+			error(err);
+			return;
+		}
 		newStorage = function() {
 			return base.apply(newStorage, arguments);
 		};
 		newStorage.get = get;
 		newStorage.set = set;
 		newStorage.clear = clear;
-		newStorage.storage = {};
-		if ( typeof medium === "string" ) {
-			medium = mediums[medium];
-		}
-		if ( !medium ) {
-			medium = mediums.default;
-		}
+		newStorage.medium = {};
 		for ( k in medium ) {
-			newStorage.storage[k] = medium[k] || mediums.default[k];
+			newStorage.medium[k] = medium[k];
 		}
 		return newStorage;
 	};
