@@ -1,7 +1,7 @@
 storage-js
 ==========
 
-[![Build Status](https://secure.travis-ci.org/michaeldrotar/storage-js.png?branch=master)](http://travis-ci.org/username/storage-js)
+[![Build Status](https://travis-ci.org/michaeldrotar/storage-js.svg)](https://travis-ci.org/michaeldrotar/storage-js)
 
 Javascript library for handling localStorage, sessionStorage, and custom storage methods with a consistent, advanced, and flexible api. Comes predefined with support for local, session, and page-level storage. Great for working with nested objects. Allows storage of null, boolean, string, number, object, and array data.
 
