@@ -24,7 +24,7 @@ gulp.task('build', function() {
 
 gulp.task('test', function() {
   return gulp.src('spec.js', {read: false})
-    .pipe(mocha({reporter:'nyan'}));
+    .pipe(mocha());
 });
 
 gulp.task('watch', function() {
