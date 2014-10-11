@@ -1,0 +1,25 @@
+{
+  "name": "storage-js",
+  "version": "0.0.0",
+  "homepage": "https://github.com/michaeldrotar/storage-js",
+  "authors": [
+    "Michael <michaeldrotar@gmail.com>"
+  ],
+  "moduleType": [
+    "amd",
+    "globals",
+    "node"
+  ],
+  "license": "MIT",
+  "private": true,
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "bluebird": "~2.3.5"
+  }
+}

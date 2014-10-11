@@ -1,0 +1,75 @@
+<html>
+<head>
+  <title>spec.html</title>
+</head>
+<body>
+  <script src="bower_components/bluebird/js/browser/bluebird.js"></script>
+  <script src="storage.js"></script>
+  <script>
+    function next(callback) {
+      return new Promise(function(resolve, reject) {
+        setTimeout(function() {
+          resolve(callback());
+        }, 1);
+      });
+    }
+    var data = {
+          person: {
+            age: 42,
+            happy: true,
+            name: {
+              first: 'John',
+              middle: 'X',
+              last: 'Doe'
+            }
+          },
+          'null': null
+        };
+    
+      for ( var key in data ) {
+        data[key] = JSON.stringify(data[key]);
+      } 
+    var storage = new Storage({
+          get: function(key) {
+            return next(function() {
+              return data[key];
+            });
+            //return Promise.resolve(data[key]);
+          },
+          all: function() {
+            return next(function() {
+              return data;
+            });
+          },
+          set: function(key, value) {
+            return next(function() {
+              console.log(data, key, value);
+              return data[key] = value;
+            });
+          },
+          remove: function(key) {
+            return next(function() {
+              delete data[key];
+            });
+          },
+          clear: function(key) {
+            return next(function() {
+              data = {};
+            });
+          },
+          decode: JSON.parse,
+          encode: JSON.stringify
+        });
+    storage.set(['an','array','key'], 'success').then(function() {
+      storage.get('an.array.key').then(function(value) {
+        console.log(value, 'success');
+      });
+    });
+    storage.set(['an','array','key'], 'success').then(function() {
+        storage.get('an.array.key').then(function(value) {
+          console.log(value, 'success');
+        });
+      });
+  </script>
+</body>
+</html>

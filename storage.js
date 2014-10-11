@@ -1,462 +1,472 @@
-(function(window, document, undefined) {
-	
-	var useLogging = false,
-		// the karma log is ugly and inaccurate, make some adjustments if it's detected...
-		karmifyLog = function() {
-			var args, i, l;
-			args = Array.prototype.slice.call(arguments, 0);
-			if ( document.location.href.indexOf("localhost:9876") >= 0 ) {
-				for ( i = 0, l = args.length; i < l; i++ ) {
-					// karma reports undefined the same as null, fix that
-					if ( args[i] === undefined ) {
-						args[i] = "!undefined!";
-					}
-					// also convert null to string to match
-					if ( args[i] === null ) {
-						args[i] = "!null!";
-					}
-					// append strings so they flow on one line
-					if ( i > 0 ) {
-						if ( typeof args[i] === "string" && typeof args[i-1] === "string" ) {
-							args[i-1] = args[i-1]+" "+args[i];
-							args.splice(i,1);
-							i--;
-							l--;
-						}
-					}
-				}
-			}
-			return args;
-		},
-		error = function() {
-			if ( window.console ) {
-				console.error.apply(console, karmifyLog.apply(this, arguments));
-			}
-		},
-		// The log function
-		log = function() {
-			if ( window.console && useLogging ) {
-				console.log.apply(console, karmifyLog.apply(this, arguments));
-			}
-		},
-		// Returns a list of keys from the given object
-		listKeys = function(obj) {
-			var list = [], k;
-			for ( k in obj ) {
-				list.push(k);
-			}
-			return list.join(", ");
-		},
-		// The library function, which can be used to call its methods, most primarily used to call the init method
-		storage = function(method) {
-			if ( storage[method] ) {
-				return storage[method].apply(this, Array.prototype.slice.call(arguments, 1));
-			} else {
-				return storage.init.apply(this, arguments);
-			}
-		},
-		// Checks if the given value is an array
-		isArray = function(val) {
-			return typeof val === "object" && val.length;
-		},
-		// Checks if the value can be a valid key
-		isKey = function(val) {
-			return isKeySimple(val) || isKeyArray(val);
-		},
-		// Checks if the given value is an arry of valid keys
-		isKeyArray = function(val) {
-			var i,l;
-			if ( !isArray(val) ) {
-				return false;
-			}
-			for ( i = 0, l = val.length; i < l; i++ ) {
-				if ( !isKeySimple(val[i]) ) {
-					return false;
-				}
-			}
-			return true;
-		},
-		isKeySimple = function(val) {
-			return typeof val === "string";
-		},
-		// Turns the given value into an array
-		makeArray = function(val) {
-			return isArray(val) ? val : [val];
-		},
-		isSupportedValue = function(val) {
-			return typeof val !== "function";
-		},
-		isKeyValueObject = function(val) {
-			return typeof val === "object" && !isArray(val);
-		},
-		// The base function for all instances of storage, handles short-hand calls for common functionality
-		base = function(key, value) {
-			switch ( arguments.length ) {
-				case 0:
-					return this.get();
-					break;
-				case 1:
-					if ( isKeyValueObject(key) ) {
-						return this.set(key, value);
-					}
-					return this.get(key);
-					break;
-				default:
-					return this.set(key, value);
-					break;
-			}
-		},
-		// Returns a value for a storage medium
-		// get(key) returns the value at key, or undefined if it does not exist
-		// get(key,default) returns value at key, or default it it does not exist
-		// get([list,of,keys]) assumes the value at key 'list' is an object and digs through
-		//   its key/object pairs to return the value at 'keys' -- if any key is not an object,
-		//   then undefined is returned because it can't find the final key
-		// get() returns an object representing the whole set of data
-		get = function(key, defaultValue) {
-			var rawValue, decodedValue, returnValue;
-			if ( key === undefined ) {
-				return all.call(this, defaultValue);
-			} else if ( isKey(key) ) {
-				key = makeArray(key);
-				rawValue = this.medium.get(key[0]);
-				if ( rawValue !== undefined ) {
-					try {
-						decodedValue = this.medium.decode(rawValue);
-					} catch (e) {
-						log("Error occured decoding value stored at",key);
-					}
-				}
-				decodedValue = traverseObject(decodedValue, key.slice(1)); // all keys after the first
-				returnValue = decodedValue === undefined ? defaultValue : decodedValue;
-				log("Got",key,"as",rawValue,"decoded as",decodedValue,"default",defaultValue,"returning",returnValue);
-				return returnValue;
-			} else {
-				error("storage.get(key,default) key must be one of undefined, string, or array of strings, got",k);
-			}
-		},
-		// Sets a value in a storage medium
-		// set(key, value) sets a simple string key to the given value, where value can be a string, a number, null,
-		//   an object, or an array (does not support functions)
-		// set(key) or set(key, undefined) removes the key from the storage medium (prefer to use the clear method)
-		// set([list,of,keys], value) assumes the value at key 'list' is an object and digs through
-		//   its key/object pairs to ultimately set the value of 'keys' to the given value -- if any
-		//   key is not an object, it will be turned into an object
-		// set({}) overwrites the entire storage medium with the given object
-		set = function(key, value) {
-			var encodedValue;
-			if ( isKeyValueObject(key) ) {
-				this.clear();
-				value = key;
-				for ( key in value ) {
-					this.set(key, value[key]);
-				}
-			} else if ( isKey(key) ) {
-				if ( arguments.length < 2 ) {
-					error("storage.set(key,value) a value must be supplied");
-				} else {
-					if ( value === undefined ) {
-						log("storage.set passing control to storage.clear");
-						return this.clear(key);
-					}
-					
-					if ( isSupportedValue(value) ) {
-						key = makeArray(key);
-						if ( key.length <= 1 ) {
-							encodedValue = this.medium.encode(value);
-						} else {
-							// get the object at the root key, traverse it to the given key, set the value, encode
-							encodedValue = this.medium.encode(traverseObject(this.get(key[0]), key.slice(1), value));
-						}
-						this.medium.set(key[0], encodedValue);
-						log("Set",key,"as",value,"encoded as",encodedValue);
-					} else {
-						error("storage.set(key,value) value cannot be a function");
-					}
-				}
-			} else {
-				error("storage.set(key,value) key must be one of string, array of strings, or object, got",k);
-			}
-			return this;
-		},
-		// Removes keys from the storage medium
-		// clear(k) will remove just the given key
-		// clear([list,of,keys]) assumes the value at key 'list' is an object and digs through
-		//   its key/object pairs until it reaches the key 'keys' then removes that from the
-		//   'list' object -- if any key is not an object, it will be turned into an object
-		// clear() will remove every key from the storage medium
-		clear = function(key) {
-			if ( isKey(key) ) {
-				key = makeArray(key);
-				if ( key.length == 1 ) {
-					this.medium.remove(key);
-				} else {
-					traverseObject(this.get(key[0]), key.slice(1), undefined);
-				}
-				log("Cleared", key);
-			} else if ( key === undefined ) {
-				this.medium.clear();
-				log("Cleared all");
-			} else {
-				error("storage.clear(key) key must be one of undefined, string, or array of strings, got",key);
-			}
-			return this;
-		},
-		// Handles traversing the key/object pairs for all functions that can take an array list of keys
-		traverseObject = function(object, key, value) {
-			if ( !key.length ) {
-				return object;
-			}
-			var keys = key.slice(0), // create copy so as not to destroy the original
-				current = object,
-				vGiven = arguments.length > 2,
-				i, l;
-			if ( typeof current !== "object" ) {
-				object = current = {};
-			}
-			while ( keys.length ) {
-				key = keys.splice(0,1)[0]; // remove keys[0] and assign to key
-				if ( keys.length ) {
-					if ( !isKeyValueObject(current[key]) ) {
-						current[key] = {};
-					}
-				} else if ( vGiven ) {
-					current[key] = value;
-				}
-				current = current[key];
-			}
-			return vGiven ? object : current;
-		},
-		// Returns an object representing the whole set of data
-		all = function(defaultValue) {
-			var allValues = this.medium.all(),
-				isEmpty = true,
-				k;
-			for ( k in allValues ) {
-				if ( allValues.hasOwnProperty(k) ) {
-					try {
-						allValues[k] = this.medium.decode(allValues[k]);
-						isEmpty = false;
-					} catch(e) {
-						log("Error occured decoding value stored at",k);
-						delete allValues[k];
-					}
-				}
-			}
-			log("Got all values as",allValues);
-			return isEmpty ? defaultValue || [] : allValues;
-		},
-		// List of predefinde mediums that come with the storage library
-		// The functions of the medium should be as sparse as possible, only doing simple gets and sets
-		// The methods of the storage object handle all the transformations and traversals and other features
-		mediums = {
-			"local": window.localStorage ? {
-				"get": function(k) {
-					var value = localStorage.getItem(k);
-					return typeof value === "string" ? value : undefined;
-				},
-				"all": function() {
-					var all = {};
-					for ( k in localStorage ) {
-						if ( localStorage.hasOwnProperty(k) ) {
-							all[k] = localStorage[k];
-						}
-					}
-					return all;
-				},
-				"set": function(k, v) {
-					localStorage.setItem(k, v);
-				},
-				"remove": function(k) {
-					localStorage.removeItem(k);
-				},
-				"clear": function() {
-					localStorage.clear();
-				},
-				"decode": function(v) {
-					return storage.decodeJSON(v);
-				},
-				"encode": function(v) {
-					return storage.encodeJSON(v);
-				}
-			} : {
-				"get": function(k) {
-					
-				},
-				"set": function(k, v) {
-					
-				}
-			},
-			"session": window.sessionStorage ? {
-				"get": function(k) {
-					var value = sessionStorage.getItem(k);
-					return typeof value === "string" ? value : undefined;
-				},
-				"all": function() {
-					var all = {};
-					for ( k in sessionStorage ) {
-						if ( sessionStorage.hasOwnProperty(k) ) {
-							all[k] = sessionStorage[k];
-						}
-					}
-					return all;
-				},
-				"set": function(k, v) {
-					sessionStorage.setItem(k, v);
-				},
-				"remove": function(k) {
-					sessionStorage.removeItem(k);
-				},
-				"clear": function() {
-					sessionStorage.clear();
-				},
-				"decode": function(v) {
-					return storage.decodeJSON(v);
-				},
-				"encode": function(v) {
-					return storage.encodeJSON(v);
-				}
-			} : {
-				"get": function(k) {
-					
-				},
-				"set": function(k, v) {
-					
-				}
-			},
-			"page": (function() {
-				var data = {},
-					// reserve fresh copy so the key can be overwritten later without breaking function
-					hasOwnProperty = data.hasOwnProperty;
-				return {
-					"get": function(k) {
-						var has = hasOwnProperty.call(data, k);
-						return has ? data[k] : undefined;
-					},
-					"all": function() {
-						var all = {};
-						for ( k in data ) {
-							if ( hasOwnProperty.call(data, k) ) {
-								all[k] = data[k];
-							}
-						}
-						return all;
-					},
-					"set": function(k, v) {
-						data[k] = v;
-					},
-					"remove": function(k) {
-						delete data[k];
-					},
-					"clear": function() {
-						for ( k in data ) {
-							if ( hasOwnProperty.call(data, k) ) {
-								delete data[k];
-							}
-						}
-					},
-					"decode": function(v) {
-						return v;
-					},
-					"encode": function(v) {
-						return v;
-					}
-				};
-			})()
-		},
-		mediumOutline = mediums.session;
-	
-	
-	// The init function initializes a new storage medium
-	// storage("string") will attempt to initialize using a predefined medium from the mediums list
-	// storage({}) will attempt to initialize using the given object medium, which should define all the functions
-	//   defined by the predefined mediums in the mediums list
-	storage.init = function(medium) {
-		var newStorage, k, err;
-		if ( typeof medium === "string" ) {
-			if ( !mediums[medium] ) {
-				err = "storage.init(medium) "+
-					"cannot instantiate a storage medium by name that's not in the list: "+
-					listKeys(mediums);
-				error(err);
-				return;
-			}
-			medium = mediums[medium];
-		}
-		if ( typeof medium === "object" ) {
-			err = "";
-			for ( k in mediumOutline ) {
-				if ( typeof medium[k] !== "function" ) {
-					err += ", "+k;
-				}
-			}
-			if ( err.length ) {
-				err = err.substring(2);
-				err = "storage.init(medium) "+
-					"cannot instantiate a custom storage medium that doesn't supply all of the required "+
-					"functions, missing: "+err;
-				error(err);
-				return;
-			}
-		} else {
-			err = "storage.init(medium) "+
-				"medium must be the name of a pre-defined storage medium or "+
-				"an object that implements all the functions of a custom storage medium";
-			error(err);
-			return;
-		}
-		newStorage = function() {
-			return base.apply(newStorage, arguments);
-		};
-		newStorage.get = get;
-		newStorage.set = set;
-		newStorage.clear = clear;
-		newStorage.medium = {};
-		for ( k in medium ) {
-			newStorage.medium[k] = medium[k];
-		}
-		return newStorage;
-	};
-	
-	// Will encode the given value as json
-	storage.encodeJSON = function(value) {
-		if ( !JSON || !JSON.stringify ) {
-			throw "storage.encodeJSON : JSON.stringify is not supported on this browser";
-		}
-		return JSON.stringify(value);
-	};
-	
-	// Will decode the given json and return a value representing it
-	storage.decodeJSON = function(json) {
-		if ( !JSON || !JSON.parse ) {
-			throw "storage.decodeJSON : JSON.parse is not supported on this browser";
-		}
-		return JSON.parse(json);
-	};
-	
-	// Call this function to enable logging (should be called from test files and in test environments)
-	storage.enableLogging = function() {
-		useLogging = true;
-	}
-	
-	// Call this function to disable logging (off by default)
-	storage.disableLogging = function() {
-		useLogging = false;
-	}
-	
-	// Allow outside use of some of the helper functions
-	storage.isArray          = isArray;
-	storage.isKey            = isKey;
-	storage.isKeyArray       = isKeyArray;
-	storage.isKeySimple      = isKeySimple;
-	storage.makeArray        = makeArray;
-	storage.isKeyValueObject = isKeyValueObject;
-	storage.log              = log;
-	storage.error            = error;
-	
-	// Assign the global reference
-	if ( !window.storage ) {
-		window.storage = storage;
-	}
-	
-})(window, document);
+'use strict';
+;(function(root,lib) {
+  if ( typeof define === 'function' && define.amd ) {
+    define([], lib);
+  } else if ( typeof module !== 'undefined' && module.exports ) {
+    module.exports = lib();
+  } else {
+    root.Storage = lib();
+  }
+})(this, function() {
+  /* ***************************************************************************
+  VIRTUAL CLASSES
+  The following classes are documented for clarity but are not explicitly
+  defined by the library.
+  *************************************************************************** */
+  /**
+    Stores the data used by the Storage class.
+    May be implemented as any object that has the given method signatures and
+    can store string data, such as localStorage and sessionStorage.
+    
+    @class StorageMedium
+  */
+  /**
+    Retrieves the content at the given key.
+    
+    @method get
+    @param {String} key
+    @return {String}
+  */
+  /**
+    Retrieves all of the key/value pairs.
+    Must create a copy so that modifying the returned object does not also
+      modify the stored values.
+    
+    @method all
+    @return {Object}
+  */
+  /**
+    Stores the given content at the given key.
+    
+    @method set
+    @param {String} key
+    @param {String} value
+  */
+  /**
+    Removes the given key from storage.
+    
+    @method remove
+    @param {String} key
+  */
+  /**
+    Removes all key/value pairs from storage.
+    
+    @method clear
+  */
+  /**
+    Decodes a value from a String to an Object.
+    Typically set to JSON.parse.
+    
+    @method decode
+    @param {String} value
+    @return {Object}
+  */
+  /**
+    Encodes a value from an Object to a String.
+    Typically set to JSON.stringify.
+    
+    @method encode
+    @param {Object} value
+    @return {String}
+  */
+  
+  /**
+    Defines a key for storage.
+    Keys are typically provided as a String with dot notation, for example:
+      person.name.first.
+    Alternatively, keys may be defined as an array of Strings where each item
+      of the array traverses down the structure. This format allows a single
+      key to have a dot in its name.
+    
+    @class StorageKey
+  */
+  
+  /**
+    Defines a value for storage.
+    A value can be any of the following types: null, boolean, number, string,
+      object.
+    Values cannot be functions. Any functions on an object will be lost.
+    Values cannot be undefined.
+    
+    @class StorageValue
+  */
+  
+  /* ***************************************************************************
+  MAIN
+  *************************************************************************** */
+  var root = this,
+      mediums = {},
+      Storage;
+  
+  function isArray(value) {
+    return Object.prototype.toString.call(value) === '[object Array]';
+  }
+  
+  function forEach(obj, callback) {
+    var key, length, ret;
+    if ( isArray(obj) ) {
+      for ( key = 0, length = obj.length; key < length; key++ ) {
+        callback(obj[key], key, obj);
+      }
+    } else {
+      for ( key in obj ) {
+        if ( obj.hasOwnProperty(key) ) {
+          ret = callback(obj[key], key, obj);
+          if ( ret !== undefined ) {
+            return ret;
+          }
+        }
+      }
+    }
+  }
+  
+  function getkeys(key) {
+    if ( !key ) return [];
+    return typeof key === 'string' ? key.split(/\./g) : key.slice(0);
+  };
+  
+  function getkeystring(key) {
+    return typeof key === 'string' ? key : key.join('.');
+  };
+  
+  var hasOwnProperty = ({}).hasOwnProperty;
+  
+  function createMediumFromObject(data) {
+    var hasOwnProperty = ({}).hasOwnProperty;
+    return {
+      get: function(key) {
+        var has = hasOwnProperty.call(data, key);
+        return has ? data[key] : undefined;
+      },
+      all: function() {
+        var all = {},
+            key;
+        for ( key in data ) {
+          if ( hasOwnProperty.call(data, key) ) {
+            all[key] = data[key];
+          }
+        }
+        return all;
+      },
+      set: function(key, value) {
+        data[key] = value.toString();
+      },
+      remove: function(key) {
+        delete data[key];
+      },
+      clear: function() {
+        var key;
+        for ( key in data ) {
+          if ( hasOwnProperty.call(data, key) ) {
+            delete data[key];
+          }
+        }
+      },
+      decode: JSON.parse,
+      encode: JSON.stringify
+    };
+  }
+  
+  mediums.page = createMediumFromObject({});
+  
+  forEach({'local':'localStorage','session':'sessionStorage'}, function(storageName, mediumName) {
+    var storage = root && root[storageName];
+    mediums[mediumName] = storage ? {
+      get: function(key) {
+        var value = storage.getItem(key);
+        return typeof value === 'string' ? value : undefined;
+      },
+      all: function() {
+        var all = {},
+            i,
+            l,
+            key;
+        for ( i = 0, l = storage.length; i < l; i++ ) {
+          key = storage.key(i);
+          all[key] = storage.getItem(key);
+        }
+        return all;
+      },
+      set: function(key, value) {
+        storage.setItem(key, value);
+      },
+      remove: function(key) {
+        storage.removeItem(key);
+      },
+      clear: function() {
+        storage.clear();
+      },
+      decode: JSON.parse,
+      encode: JSON.stringify
+    } : mediums.page;
+  });
+  
+  function createMedium(obj) {
+    var isMedium = true,
+        isStrings = true;
+    if ( !obj ) {
+      return createMediumFromObject({});
+    } else if ( typeof obj === 'string' ) {
+      if ( mediums.hasOwnProperty(obj) ) {
+        return mediums[obj];
+      }
+    } else {
+      forEach(mediums.page, function(_, key) {
+        var type = typeof obj[key];
+        // To be a medium, must have all the medium functions
+        // encode and decode are optional and may be undefined
+        if ( type !== 'function' ) {
+          if ( (key !== 'encode' && key !== 'decode') || type === 'undefined' ) {
+            isMedium = false;
+          }
+        }
+      });
+      if ( isMedium ) {
+        // default encode and decode
+        obj.encode = obj.encode || JSON.stringify;
+        obj.decode = obj.decode || JSON.parse;
+        return obj;
+      }
+      forEach(obj, function(value, key) {
+        var type = typeof value;
+        if ( type !== 'string' ) {
+          isStrings = false;
+        }
+      });
+      if ( isStrings ) {
+        return createMediumFromObject(obj);
+      }
+    }
+    throw new Error('Storage(medium, namespace) : medium must be the name of a predefined medium, an object that implements the StorageMedium interface, or an object that has only string values');
+  };
+  
+  /**
+    Provides advanced functionality for working with storage mediums.
+    
+    @class Storage
+    @constructor
+    @param {StorageMedium} [medium]
+    @param {String} [namespace]
+    @return {Storage}
+  */
+  Storage = function(medium, namespace) {
+    var data;
+    if ( this === root ) {
+      return new Storage(medium, namespace);
+    }
+    
+    medium = createMedium(medium);
+    namespace = getkeys(namespace);
+    
+    function addNamespace(key) {
+      key = getkeys(key);
+      return namespace ? namespace.concat(key) : key;
+    }
+    
+    /**
+      Retrieves a value from Storage.
+      
+      @method get
+      @param {StorageKey} key
+      @return {StorageValue}
+    */
+    this.get = function(key) {
+      //return Storage.get(medium, addNamespace(key));
+      return get(medium, addNamespace(key));
+    };
+    
+    /**
+      Retrieves a collection of all key/value pairs that are in Storage.
+      
+      @method all
+      @return {Object}
+    */
+    this.all = function() {
+      //return namespace.length ? Storage.get(medium, namespace) : Storage.all(medium);
+      return namespace.length ? get(medium, namespace) : all(medium);
+    };
+    
+    /**
+      Stores a given value into the given medium using the given key.
+      
+      @static
+      @method set
+      @param {StorageMedium} medium
+      @param {StorageKey} key
+      @param {StorageValue} value
+    */
+    this.set = function(key, value) {
+      //Storage.set(medium, addNamespace(key), value);
+      return set(medium, addNamespace(key), value);
+    };
+    
+    /**
+      Removes a given key from Storage.
+      
+      @method remove
+      @param {StorageKey} key
+    */
+    this.remove = function(key) {
+      //Storage.remove(medium, addNamespace(key));
+      return remove(medium, addNamespace(key));
+    };
+    
+    /**
+      Clears everything from the storage medium.
+      
+      @method clear
+    */
+    this.clear = function() {
+      if ( namespace.length ) {
+        //Storage.set(medium, namespace, {});
+        return set(medium, namespace, {});
+      } else {
+        //Storage.clear(medium);
+        return clear(medium);
+      }
+    };
+    
+    /**
+      Returns a new Storage object that uses the same storage medium
+      as this storage object but is namespaced into the given namespace.
+      
+      @method createNamespace
+      @param {String} namespace
+      @return {Storage}
+      @example
+          var myapp = new Storage('local', 'myapp'),
+              config = myapp.createNamespace('config');
+          // set localStorage.myapp.config.stuffEnabled = true
+          config.set('stuffEnabled', true);
+    */
+    this.createNamespace = function(ns) {
+      var newNamespace = namespace.slice(0);
+      newNamespace.push(ns);
+      return new Storage(medium, newNamespace);
+    }
+    
+    return this;
+  };
+  
+  function _get(medium, firstkey, keys, value) {
+    var lastkey = keys.pop(),
+        i,
+        l;
+    if ( !value ) {
+      return undefined;
+    }
+    try {
+      value = medium.decode(value);
+    } catch ( e ) {
+      throw new Error('Failed to parse value stored at '+key);
+    }
+    for ( i = 0, l = keys.length; i < l; i++ ) {
+      if ( typeof value[keys[i]] === 'object' ) {
+        value = value[keys[i]];
+      } else {
+        return undefined;
+      }
+    }
+    if ( lastkey ) {
+      return value[lastkey];
+    }
+    return value;
+  }
+  
+  function get(medium, key) {
+    var keys = getkeys(key),
+        firstkey = keys.shift(),
+        value = medium.get(firstkey);
+    return value && value.then ? value.then(function(value) {
+      return _get(medium, firstkey, keys, value);
+    }) : _get(medium, firstkey, keys, value);
+  }
+  
+  function _all(medium, obj) {
+    var copy = {};
+    forEach(obj, function(value, key) {
+      copy[key] = medium.decode(value);
+    });
+    return copy;
+  }
+  
+  function all(medium) {
+    var obj = medium.all();
+    return obj && obj.then ? obj.then(function(obj) {
+      return _all(medium, obj);
+    }) : _all(medium, obj);
+  }
+  
+  function _set(medium, firstkey, keys, original, value) {
+    var lastkey = keys.pop(),
+        current = original,
+        i;
+    if ( lastkey && !original ) {
+      original = current = {};
+    }
+    for ( i = 0; i < keys.length; i++ ) {
+      if ( typeof current[keys[i]] !== 'object' ) {
+        current[keys[i]] = {};
+      }
+      current = current[keys[i]];
+    }
+    if ( lastkey ) {
+      current[lastkey] = value;
+    } else {
+      original = current = value;
+    }
+    try {
+      return medium.set(firstkey, medium.encode(original));
+    } catch ( e ) {
+      throw new Error('Failed to store value at '+key);
+    }
+  }
+  
+  function set(medium, key, value) {
+    var keys = getkeys(key),
+        firstkey = keys.shift(),
+        original = get(medium, firstkey);
+    return original && original.then ? original.then(function(original) {
+      return _set(medium, firstkey, keys, original, value);
+    }) : _set(medium, firstkey, keys, original, value);
+  }
+  
+  function _remove(medium, firstkey, keys, original) {
+    var lastkey = keys.pop(),
+        current = original,
+        i;
+    if ( !original ) {
+      return;
+    }
+    for ( i = 0; i < keys.length; i++ ) {
+      if ( typeof current[keys[i]] !== 'object' ) {
+        return;
+      }
+      current = current[keys[i]];
+    }
+    if ( lastkey ) {
+      delete current[lastkey];
+      try {
+        return medium.set(firstkey, medium.encode(original));
+      } catch ( e ) {
+        throw new Error('Failed to remove key at '+key);
+      }
+    }
+    return medium.remove(firstkey);
+  }
+  
+  function remove(medium, key) {
+    var keys = getkeys(key),
+        firstkey = keys.shift(),
+        original = get(medium, firstkey);
+    return original && original.then ? original.then(function(original) {
+      return _remove(medium, firstkey, keys, original);
+    }) : _remove(medium, firstkey, keys, original);
+  }
+  
+  function clear(medium) {
+    return medium.clear();
+  }
+  
+  return Storage;
+});
