@@ -16,7 +16,7 @@
     "gulp-uglify": "^1.0.1"
   },
   "scripts": {
-    "test": "mocha spec.js"
+    "test": "gulp test"
   },
   "repository": {
     "type": "git",
